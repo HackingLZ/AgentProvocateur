@@ -114,8 +114,17 @@ python agent_provocateur.py -v
 # Custom log file
 python agent_provocateur.py --log-file scan_test.log
 
+# Custom canary map file
+python agent_provocateur.py --canary-map-file canary_map.jsonl
+
+# Canary tracking TTL (seconds)
+python agent_provocateur.py --canary-ttl 3600
+
 # Adjust stats display interval
 python agent_provocateur.py --stats-interval 5
+
+# Disable console stats
+python agent_provocateur.py --no-console-stats
 
 # Allow specific IPs to access dashboard
 python agent_provocateur.py --dashboard-ips 192.168.1.100 10.0.0.0/8
@@ -127,6 +136,9 @@ python agent_provocateur.py --callback-url http://localhost:8080/callback
 python agent_provocateur.py --callback-host 203.0.113.10
 python agent_provocateur.py --callback-host 203.0.113.10 --callback-scheme https
 python agent_provocateur.py --callback-host 203.0.113.10 --callback-port 8080
+
+# Override callback path prefix
+python agent_provocateur.py --callback-host 203.0.113.10 --callback-path /canary/
 
 # Disable file logging
 python agent_provocateur.py --no-log
@@ -162,6 +174,8 @@ All events are logged to `honeypot.log` in JSON format:
 {"event": "canary_issued", "timestamp": "2024-01-15T10:30:45", "canary_id": "7f9b12c3", "service": "SSH", "source_ip": "192.168.1.100", "source_port": 54321, "callback_url": "http://localhost:8080/callback/7f9b12c3"}
 {"event": "callback_detected", "timestamp": "2024-01-15T10:31:02", "canary_id": "abc123", "source_ip": "192.168.1.100", "user_agent": "Python/3.9", "path": "/callback/abc123"}
 ```
+
+Canary issuance and detections are also written to `canary_map.jsonl` for correlation.
 
 ## Dashboard Security
 

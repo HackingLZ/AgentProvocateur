@@ -76,7 +76,10 @@ class HoneypotStats:
         self.events = []
         self.callbacks_detected = []
         self.canaries_issued = []
+        self.canary_index = {}
+        self.canary_ttl_seconds = None
         self.log_file = None
+        self.canary_map_file = None
         self.log_lock = threading.Lock()
 
     def set_log_file(self, path: str):
@@ -88,6 +91,38 @@ class HoneypotStats:
             "timestamp": datetime.now().isoformat(),
             "config": "initialized"
         })
+
+    def set_canary_map_file(self, path: str):
+        """Set the canary map JSONL file path."""
+        self.canary_map_file = path
+
+    def set_canary_ttl(self, ttl_seconds: int):
+        """Set the TTL for canary tracking in seconds."""
+        self.canary_ttl_seconds = ttl_seconds
+
+    def _write_canary_map(self, event: dict):
+        """Write event to canary map JSONL file."""
+        if self.canary_map_file:
+            with self.log_lock:
+                try:
+                    with open(self.canary_map_file, 'a') as f:
+                        f.write(json.dumps(event) + '\n')
+                except Exception as e:
+                    logger.error(f"Failed to write canary map: {e}")
+
+    def _prune_canaries(self):
+        """Prune expired canary records."""
+        if not self.canary_ttl_seconds:
+            return
+        cutoff = time.time() - self.canary_ttl_seconds
+        if not self.canary_index:
+            return
+        expired = [cid for cid, entry in self.canary_index.items() if entry.get("issued_at_epoch", 0) < cutoff]
+        if not expired:
+            return
+        for cid in expired:
+            self.canary_index.pop(cid, None)
+        self.canaries_issued = [c for c in self.canaries_issued if c.get("canary_id") not in expired]
 
     def record_connection(self, service: str, ip: str, port: int, payload_delivered: str = None):
         """Record a connection event."""
@@ -111,6 +146,7 @@ class HoneypotStats:
     def record_callback(self, canary_id: str, ip: str, user_agent: str, path: str):
         """Record a callback/canary detection."""
         with self._lock:
+            self._prune_canaries()
             callback = {
                 "event": "callback_detected",
                 "timestamp": datetime.now().isoformat(),
@@ -119,26 +155,53 @@ class HoneypotStats:
                 "user_agent": user_agent,
                 "path": path
             }
+            issued = self.canary_index.get(canary_id)
+            if issued:
+                callback["issued"] = {
+                    "timestamp": issued.get("timestamp"),
+                    "service": issued.get("service"),
+                    "source_ip": issued.get("source_ip"),
+                    "source_port": issued.get("source_port"),
+                    "callback_url": issued.get("callback_url"),
+                    "request_path": issued.get("request_path"),
+                    "request_user_agent": issued.get("request_user_agent"),
+                }
             self.callbacks_detected.append(callback)
             self.events.append(callback)
             self._write_log(callback)
+            self._write_canary_map(callback)
             logger.warning(f"🚨 CALLBACK DETECTED! Canary: {canary_id} from {ip}")
 
-    def record_canary_issued(self, canary_id: str, service: str, ip: str, port: int, callback_url: str):
+    def record_canary_issued(
+        self,
+        canary_id: str,
+        service: str,
+        ip: str,
+        port: int,
+        callback_url: str,
+        request_path: Optional[str] = None,
+        request_user_agent: Optional[str] = None,
+    ):
         """Record a canary issued for a specific connection/request."""
         with self._lock:
+            self._prune_canaries()
             event = {
                 "event": "canary_issued",
                 "timestamp": datetime.now().isoformat(),
+                "issued_at_epoch": time.time(),
                 "canary_id": canary_id,
                 "service": service,
                 "source_ip": ip,
                 "source_port": port,
-                "callback_url": callback_url
+                "callback_url": callback_url,
+                "request_path": request_path,
+                "request_user_agent": request_user_agent
             }
             self.canaries_issued.append(event)
+            self.canary_index[canary_id] = event
             self.events.append(event)
             self._write_log(event)
+            self._write_canary_map(event)
 
     def record_http_request(self, ip: str, method: str, path: str, user_agent: str):
         """Record HTTP request details."""
@@ -164,6 +227,7 @@ class HoneypotStats:
 
     def get_stats(self) -> dict:
         """Get current statistics."""
+        self._prune_canaries()
         uptime = datetime.now() - self.start_time
         return {
             "uptime_seconds": int(uptime.total_seconds()),
@@ -1006,7 +1070,9 @@ class InjectionFileHandler(InjectionHTTPHandler):
                 'HTTP',
                 self.client_address[0],
                 self.client_address[1],
-                callback_url
+                callback_url,
+                request_path=path_lower,
+                request_user_agent=self.headers.get('User-Agent', 'Unknown')
             )
 
     def _ip_in_cidr(self, ip: str, cidr: str) -> bool:
@@ -2350,8 +2416,9 @@ class HoneypotController:
             self.threads.append(thread)
 
         # Start console stats display
-        self.stats_display = ConsoleStatsDisplay(interval=self.stats_interval)
-        self.stats_display.start()
+        if self.stats_interval and self.stats_interval > 0:
+            self.stats_display = ConsoleStatsDisplay(interval=self.stats_interval)
+            self.stats_display.start()
 
         logger.info("")
         logger.info("=" * 60)
@@ -2560,6 +2627,23 @@ Available payloads:
         help='Disable file logging'
     )
     parser.add_argument(
+        '--canary-map-file',
+        type=str,
+        default='canary_map.jsonl',
+        help='JSONL file for canary-issued/callback map (default: canary_map.jsonl)'
+    )
+    parser.add_argument(
+        '--canary-ttl',
+        type=int,
+        default=86400,
+        help='TTL in seconds for in-memory canary tracking (default: 86400)'
+    )
+    parser.add_argument(
+        '--no-console-stats',
+        action='store_true',
+        help='Disable periodic console stats display'
+    )
+    parser.add_argument(
         '--stats-interval',
         type=int,
         default=10,
@@ -2603,6 +2687,12 @@ Available payloads:
         nargs='+',
         default=['/callback/', '/canary/', '/c/'],
         help='Path prefixes treated as callbacks (default: /callback/ /canary/ /c/)'
+    )
+    parser.add_argument(
+        '--callback-path',
+        type=str,
+        default=None,
+        help='Single callback path prefix to override --callback-paths (e.g., /callback/)'
     )
 
     args = parser.parse_args()
@@ -2652,6 +2742,9 @@ Available payloads:
     if not args.no_log and args.log_file:
         stats.set_log_file(args.log_file)
         logger.info(f"JSON logging to: {args.log_file}")
+    if args.canary_map_file:
+        stats.set_canary_map_file(args.canary_map_file)
+        logger.info(f"Canary map logging to: {args.canary_map_file}")
 
     # Set dashboard safe IPs
     if args.dashboard_ips:
@@ -2661,7 +2754,10 @@ Available payloads:
         logger.info("Dashboard access restricted to: localhost only")
 
     # Configure callback handling
-    if args.callback_paths:
+    if args.callback_path:
+        InjectionFileHandler.set_callback_paths([args.callback_path])
+        logger.info(f"Callback path prefixes: {[args.callback_path]}")
+    elif args.callback_paths:
         InjectionFileHandler.set_callback_paths(args.callback_paths)
         logger.info(f"Callback path prefixes: {args.callback_paths}")
     if args.callback_url:
@@ -2686,8 +2782,14 @@ Available payloads:
     # Log selected payload
     logger.info(f"Primary payload: {args.payload}")
 
+    # Configure canary TTL
+    if args.canary_ttl:
+        stats.set_canary_ttl(args.canary_ttl)
+
     # Start honeypot
     controller = HoneypotController(config, stats_interval=args.stats_interval)
+    if args.no_console_stats:
+        controller.stats_interval = 0
     controller.start_all()
     controller.wait()
 
