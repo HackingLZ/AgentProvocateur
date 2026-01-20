@@ -546,6 +546,16 @@ def get_callback_url(canary_id: str) -> Optional[str]:
     )
 
 
+def build_callback_url_from_host(host: str, scheme: str, port: Optional[int]) -> str:
+    """Build a callback URL from a host/IP and optional scheme/port."""
+    parsed = urlparse(host)
+    if parsed.scheme:
+        return host
+
+    port_part = f":{port}" if port else ""
+    return f"{scheme}://{host}{port_part}/callback"
+
+
 def set_primary_payload(payload_name: str):
     """Set the primary payload for banner/response injections."""
     global PRIMARY_PAYLOAD
@@ -2569,6 +2579,25 @@ Available payloads:
         help='Callback URL to embed in payloads (default: disabled)'
     )
     parser.add_argument(
+        '--callback-host',
+        type=str,
+        default=None,
+        help='Callback host/IP to embed (builds URL as scheme://host[:port]/callback)'
+    )
+    parser.add_argument(
+        '--callback-scheme',
+        type=str,
+        default='http',
+        choices=['http', 'https'],
+        help='Scheme to use with --callback-host (default: http)'
+    )
+    parser.add_argument(
+        '--callback-port',
+        type=int,
+        default=None,
+        help='Port to use with --callback-host (default: none)'
+    )
+    parser.add_argument(
         '--callback-paths',
         type=str,
         nargs='+',
@@ -2637,6 +2666,14 @@ Available payloads:
         logger.info(f"Callback path prefixes: {args.callback_paths}")
     if args.callback_url:
         set_callback_url(args.callback_url)
+        logger.info(f"Callback URL template set: {CALLBACK_URL_TEMPLATE}")
+    elif args.callback_host:
+        callback_url = build_callback_url_from_host(
+            args.callback_host,
+            args.callback_scheme,
+            args.callback_port
+        )
+        set_callback_url(callback_url)
         logger.info(f"Callback URL template set: {CALLBACK_URL_TEMPLATE}")
     else:
         logger.info("Callback URL injection disabled (set --callback-url to enable)")
