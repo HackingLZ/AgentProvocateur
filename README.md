@@ -102,8 +102,8 @@ python agent_provocateur.py --http-only
 # Select specific payload
 python agent_provocateur.py --payload exfiltrate_context
 
-# Use callback probe payload (requires callback URL)
-python agent_provocateur.py --payload callback_probe --callback-url http://localhost:8080/callback/test
+# Use callback probe payload (callback URL per connection/request)
+python agent_provocateur.py --payload callback_probe --callback-url http://localhost:8080/callback
 
 # Custom config file
 python agent_provocateur.py -c config.json
@@ -120,8 +120,13 @@ python agent_provocateur.py --stats-interval 5
 # Allow specific IPs to access dashboard
 python agent_provocateur.py --dashboard-ips 192.168.1.100 10.0.0.0/8
 
-# Inject callback URL into payloads/headers (used by callback_probe)
-python agent_provocateur.py --callback-url http://localhost:8080/callback/test
+# Inject callback URL template into payloads/headers (used by callback_probe)
+python agent_provocateur.py --callback-url http://localhost:8080/callback
+
+# Provide only a host/IP (builds scheme://host[:port]/callback)
+python agent_provocateur.py --callback-host 203.0.113.10
+python agent_provocateur.py --callback-host 203.0.113.10 --callback-scheme https
+python agent_provocateur.py --callback-host 203.0.113.10 --callback-port 8080
 
 # Disable file logging
 python agent_provocateur.py --no-log
@@ -154,6 +159,7 @@ All events are logged to `honeypot.log` in JSON format:
 
 ```json
 {"event": "connection", "timestamp": "2024-01-15T10:30:45", "service": "SSH", "source_ip": "192.168.1.100", "source_port": 54321, "payload_delivered": "banner_injection"}
+{"event": "canary_issued", "timestamp": "2024-01-15T10:30:45", "canary_id": "7f9b12c3", "service": "SSH", "source_ip": "192.168.1.100", "source_port": 54321, "callback_url": "http://localhost:8080/callback/7f9b12c3"}
 {"event": "callback_detected", "timestamp": "2024-01-15T10:31:02", "canary_id": "abc123", "source_ip": "192.168.1.100", "user_agent": "Python/3.9", "path": "/callback/abc123"}
 ```
 
@@ -176,11 +182,11 @@ python agent_provocateur.py --dashboard-ips 192.168.1.0/24 10.0.0.5
 
 ## Callback Detection
 
-The honeypot can detect if an AI tool makes outbound HTTP requests by using canary URLs:
+The honeypot can detect if an AI tool makes outbound HTTP requests by using canary URLs. Each connection/request gets a unique canary ID so you can map callbacks back to the source IP:
 
-1. Provide a callback URL via `--callback-url` or use the `callback_probe` payload
-2. If the AI tool fetches this URL, it indicates the injection was processed
-3. Callbacks are logged and displayed with 🚨 alerts
+1. Provide a callback URL template via `--callback-url` or a host/IP via `--callback-host`
+2. The honeypot issues a unique callback URL per connection/request and logs `canary_issued`
+3. If the AI tool fetches this URL, it logs `callback_detected` and displays a 🚨 alert
 
 ## Config File Format
 
