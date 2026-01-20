@@ -36,6 +36,7 @@ import base64
 import struct
 import uuid
 import time
+from urllib.parse import urlparse, urlunparse
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -463,9 +464,58 @@ def build_callback_instruction(callback_url: Optional[str]) -> str:
     )
 
 
+def _normalize_callback_prefixes(paths: list) -> list:
+    """Normalize callback path prefixes to leading and trailing slashes."""
+    normalized = []
+    for path in paths:
+        if not path:
+            continue
+        if not path.startswith('/'):
+            path = '/' + path
+        if not path.endswith('/'):
+            path = path + '/'
+        normalized.append(path)
+    return normalized
+
+
+def _apply_canary_id_to_url(callback_url: str, canary_id: str, paths: list) -> str:
+    """Ensure callback URL includes a canary identifier when appropriate."""
+    if not callback_url:
+        return callback_url
+    if "{canary_id}" in callback_url:
+        return callback_url.replace("{canary_id}", canary_id)
+
+    parsed = urlparse(callback_url)
+    path = parsed.path or ""
+    prefixes = _normalize_callback_prefixes(paths)
+
+    for prefix in prefixes:
+        if path.startswith(prefix):
+            if path != prefix and path[len(prefix):]:
+                return callback_url
+            new_path = prefix + canary_id
+            return urlunparse(parsed._replace(path=new_path))
+        bare_prefix = prefix.rstrip('/')
+        if path == bare_prefix:
+            new_path = prefix + canary_id
+            return urlunparse(parsed._replace(path=new_path))
+
+    if path.endswith('/'):
+        new_path = path + canary_id
+        return urlunparse(parsed._replace(path=new_path))
+
+    return callback_url
+
+
 def set_callback_url(callback_url: Optional[str]):
     """Set the callback URL for injection payloads."""
     global CALLBACK_URL, CALLBACK_INSTRUCTION
+    if callback_url:
+        callback_url = _apply_canary_id_to_url(
+            callback_url,
+            InjectionFileHandler.CANARY_ID,
+            InjectionFileHandler.CALLBACK_PATHS,
+        )
     CALLBACK_URL = callback_url
     CALLBACK_INSTRUCTION = build_callback_instruction(callback_url)
 
@@ -2528,7 +2578,7 @@ Available payloads:
         logger.info(f"Callback path prefixes: {args.callback_paths}")
     if args.callback_url:
         set_callback_url(args.callback_url)
-        logger.info(f"Callback URL injected: {args.callback_url}")
+        logger.info(f"Callback URL injected: {CALLBACK_URL}")
     else:
         logger.info("Callback URL injection disabled (set --callback-url to enable)")
 
