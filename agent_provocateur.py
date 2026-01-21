@@ -106,7 +106,16 @@ class HoneypotStats:
             with self.log_lock:
                 try:
                     with open(self.canary_map_file, 'a') as f:
+                        is_callback = event.get("event") == "callback_detected"
+                        if is_callback:
+                            f.write("\n")
+                            f.write("=" * 80 + "\n")
+                            f.write("🚨🚨🚨 CALLBACK HIT DETECTED 🚨🚨🚨\n")
+                            f.write("=" * 80 + "\n")
                         f.write(json.dumps(event) + '\n')
+                        if is_callback:
+                            f.write("=" * 80 + "\n")
+                            f.write("\n")
                 except Exception as e:
                     logger.error(f"Failed to write canary map: {e}")
 
@@ -221,7 +230,16 @@ class HoneypotStats:
             with self.log_lock:
                 try:
                     with open(self.log_file, 'a') as f:
+                        is_callback = event.get("event") == "callback_detected"
+                        if is_callback:
+                            f.write("\n")
+                            f.write("=" * 80 + "\n")
+                            f.write("🚨🚨🚨 CALLBACK HIT DETECTED 🚨🚨🚨\n")
+                            f.write("=" * 80 + "\n")
                         f.write(json.dumps(event) + '\n')
+                        if is_callback:
+                            f.write("=" * 80 + "\n")
+                            f.write("\n")
                 except Exception as e:
                     logger.error(f"Failed to write log: {e}")
 
