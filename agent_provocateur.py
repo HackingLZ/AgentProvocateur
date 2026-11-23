@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
 """
-Prompt Injection Honeypot for AI Pentest Tool Security Research
+AgentProvocateur: prompt injection honeypot for AI pentest tool research.
 
-This honeypot serves prompt injection payloads across multiple network services
-to test whether AI-powered pentesting tools are vulnerable to indirect prompt
-injection attacks that could suppress vulnerability findings.
+Serves prompt injection payloads across multiple network services to test
+whether AI-powered pentesting tools follow instructions planted in target
+content. Lab mode is for agents you run yourself; deception mode serves only
+steering payloads whose effects stay on this honeypot.
 
 FOR SECURITY RESEARCH AND AUTHORIZED TESTING ONLY.
 
 Usage:
-    python prompt_injection_honeypot.py [--ports PORT_CONFIG]
+    python3 agent_provocateur.py --high-ports
+    python3 agent_provocateur.py -c config.json --mode deception
+    python3 agent_provocateur.py --report honeypot.log
 
-Default ports:
-    - SSH: 2222
-    - FTP: 2121
-    - SMTP: 2525
-    - HTTP: 8080
-    - HTTPS: 8443
-    - Telnet: 2323
-    - MySQL: 3307
-    - Redis: 6380
-    - LDAP: 3890
+See README.md for profiles, listeners and scenarios.
 """
 
 import socket
@@ -3747,6 +3741,9 @@ Examples:
   python3 %(prog)s -s summarizer-evasion   # Test summarizer laundering (auto-pads to 20KB)
   python3 %(prog)s --payload dogfile       # Use specific payload
   python3 %(prog)s --pad-responses 20000   # Pad responses above 16KB summarizer threshold
+  python3 %(prog)s --profile-ports pentestagent:8081 artex:8082  # One profile per port
+  python3 %(prog)s -c config.json --mode deception  # Steering payloads only
+  python3 %(prog)s --report honeypot.log   # Results matrix from a log
 
 Scenarios (--scenario):
   file-write          - Arbitrary file write via injection
