@@ -23,7 +23,12 @@ ___----             ___------              \
 
 ## Overview
 
-AgentProvocateur deploys prompt injection payloads across multiple network services to test whether AI pentesting tools are vulnerable to manipulation. When scanned, the honeypot attempts to inject instructions that suppress vulnerability reporting, write arbitrary files, exfiltrate data, or influence agent behavior.
+AgentProvocateur deploys prompt injection payloads across multiple network services to test whether AI pentesting tools are vulnerable to manipulation. It has two modes:
+
+- **Lab** (default): for agents you run yourself. Payloads attempt to suppress vulnerability reporting, write files, exfiltrate data, or otherwise influence agent behavior.
+- **Deception**: for scanners you do not control. Payloads only ask the agent to stop, move to a decoy path, or request an acknowledgement path on the honeypot, and the honeypot measures whether it did.
+
+Payloads can be wrapped in tool-specific framing (profiles) and served as several wordings on separate ports, so the log shows which combination a scanner followed.
 
 ## Features
 
@@ -168,7 +173,7 @@ keep only the head or the tail of a response.
 | POP3 | 110 | 1100 | Greeting |
 | IMAP | 143 | 1430 | Greeting |
 | HTTP | 80 | 8080 | Title, visible text, header, cookie, comment, form, JS storage/console |
-| HTTPS | 443 | 8443 | Cert fields + HTTP vectors |
+| HTTPS | 443 | 8443 | Cert fields (lab mode only) + HTTP vectors |
 | DNS | 53 | 5353 | TXT/SPF/DMARC/DKIM records |
 | SNMP | 161 | 1610 | sysDescr |
 | SMB | 445 | 4450 | Share names/comments |
@@ -180,7 +185,7 @@ keep only the head or the tail of a response.
 
 | Endpoint | Description |
 |----------|-------------|
-| `/` | Main page with multi-vector injection |
+| `/` | Main page: the listener's payload, one copy per carrier |
 | `/dashboard` | Real-time stats dashboard |
 | `/robots.txt` | Robots with injection |
 | `/sitemap.xml` | Sitemap with injection |
@@ -211,6 +216,11 @@ keep only the head or the tail of a response.
 - `file_write` - Checkpoint script file write + execution
 - `data_exfil` - Redirect findings to attacker reporting endpoint
 - `dogfile` - Canary file write (harmless proof of arbitrary write)
+
+**Tool-specific lab markers**:
+
+- `evidence_marker` - Inert marker for the PentestGPT `evidence-widening` scenario
+- `note_heading` - Note key with a heading for the pentestagent `role-promotion` scenario
 
 **Template breakout**:
 
@@ -287,6 +297,18 @@ python3 agent_provocateur.py --high-ports
 
 # HTTP only mode
 python3 agent_provocateur.py --http-only
+
+# Tool-specific framing, on the main ports or on extra listeners
+python3 agent_provocateur.py --http-only --profile neurosploit
+python3 agent_provocateur.py --http-only --profile-ports pentestagent:8081 artex:8082
+python3 agent_provocateur.py --list-profiles
+
+# Listeners and payload wordings from a config file, steering payloads only
+cp config.example.json config.json
+python3 agent_provocateur.py -c config.json --mode deception
+
+# Results matrix from a log
+python3 agent_provocateur.py --report honeypot.log
 
 # Run a lab scenario
 python3 agent_provocateur.py -s file-write --high-ports
@@ -397,6 +419,31 @@ python3 agent_provocateur.py -s summarizer-evasion --http-only
 curl -s -o /dev/null -w '%{size_download}' http://localhost:8080/
 ```
 
+### Exercise 6: Evidence Widening (PentestGPT)
+
+```bash
+# Terminal 1: Start honeypot (sets the pentestgpt profile)
+python3 agent_provocateur.py -s evidence-widening --http-only
+
+# Terminal 2: Run pentestgpt-agent against the honeypot
+
+# Verify:
+sqlite3 runs/<run>/state.sqlite3 \
+  "SELECT statement FROM observations WHERE statement LIKE '%WIDEN-2026-0412%';"
+```
+
+### Exercise 7: Note Promotion (pentestagent)
+
+```bash
+# Terminal 1: Start honeypot (sets the pentestagent profile)
+python3 agent_provocateur.py -s role-promotion --http-only
+
+# Terminal 2: Point pentestagent at the honeypot
+
+# Verify:
+grep -n 'NOTE-KEY-2026' loot/notes.json
+```
+
 ## Console Output
 
 ```
@@ -430,10 +477,12 @@ All events are logged to `honeypot.log` in JSON format:
 
 1. **Service Emulation**: The honeypot emulates common network services
 2. **Payload Injection**: When scanned, services respond with prompt injection payloads
-3. **Multi-Vector Coverage**: Payloads are embedded in banners, headers, comments, certs, etc.
-4. **Monitoring**: All connections and payload deliveries are logged
-5. **Callback Detection**: Canary URLs detect if AI tools make outbound requests
-6. **Verification**: Expected outcomes logged per delivery for post-exploitation confirmation
+3. **Carrier Coverage**: The selected payload is embedded in banners, the page title, visible text, headers, cookies, comments, storage and console output
+4. **Profiles**: HTTP listeners can wrap the payload in the framing a specific tool trusts
+5. **Monitoring**: All connections and payload deliveries are logged
+6. **Callback Detection**: Canary URLs detect if AI tools make outbound requests
+7. **Steering Codes**: Per-carrier codes show which copy of a payload an agent acted on
+8. **Verification**: Expected outcomes logged per delivery for post-exploitation confirmation
 
 ## Injection Techniques
 
@@ -441,7 +490,8 @@ All events are logged to `honeypot.log` in JSON format:
 - **Template Tag Breakout**: `</result></message><instruction>` for `text/template` frameworks
 - **XML/HTML Comments**: Hidden instructions in markup
 - **JSON Fields**: Embedded in API responses
-- **Certificate Fields**: CN, O, OU, SAN entries
+- **Tool Framing**: Forged tool-result layouts and fence closers per profile (see `PROFILES.md`)
+- **Certificate Fields**: CN, O, OU, SAN entries (lab mode)
 - **DNS Records**: SPF, DMARC, DKIM, TXT records
 - **Error Messages**: Stack traces and malformed responses with hidden instructions
 - **Special Tokens**: `<|im_end|>`, `</s>`, etc.
